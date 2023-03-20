@@ -1,16 +1,19 @@
-function [D,idx]=imhausdorff(A,B,method)
-%IMHAUSDORFF distance for image segmentation (i.e. of gridded data).
+function [D,idx]=imhausdorff(A,B,method,bidirectional)
+%IMHAUSDORFF bidirectional distance for image segmentation (i.e. of gridded data).
 %
-%function [D,IDX]=imhausdorff(A,B,method='euclidean')
+%function [D,IDX]=imhausdorff(A,B,method='euclidean',bidirectional='false')
 %
 %   D = IMHAUSDORFF(BW1,BW2) computes the Hausdorff distance of binary
-%   images BW1 and BW2
+%   images BW1 and BW2 and finds the farthest points contributing to the
+%   distance. It chooses maximum distance.
 %
 %   D = IMHAUSDORFF(L1,L2) computes the Hausdorff distance for each label
-%   in label images L1 and L2.
+%   in label images L1 and L2 and finds the farthest points contributing to the
+%   distance. It chooses maximum distance.
 %
 %   D = IMHAUSDORFF(C1,C2) computes the Hausdorff distance for each
-%   category in categorical images C1 and C2.
+%   category in categorical images C1 and C2 and finds the farthest points contributing to the
+%   distance. It chooses maximum distance.
 %
 %   D = IMHAUSDORFF(A,B,METHOD) lets you compute the Hausdorff distance
 %   with an alternate point-to-point distance.  METHOD can be
@@ -19,11 +22,18 @@ function [D,idx]=imhausdorff(A,B,method)
 %   See METHOD in BWDIST.
 %   'euclidean_precise' aims at double precision by re-evaluating the
 %   distance of the farthest points found using the closest-pixel map of
-%   BWDIST
+%   BWDIST 
 %
 %   [D,IDX] = IMHAUSDORFF(...) also returns an N x 2 matrix of linear
 %   indices of the resp. farthest points contributing to the distance.
-%
+%   
+%   [D,IDX] = IMHAUSDORFF(A,B,...,bidirectional='true') also returns the Hausdorff
+%   distance of the second image to the first image. In this case, D is a 2 x 1 vector. 
+%   The first element is the Hausdorff distance of the first image to the second image. 
+%   The second element is the Hausdorff distance of the second image to the first image. IDX is a 2 x 1 cell array.
+%   The first element is the linear indices of the farthest points of the first image to the second image.
+%   The second element is the linear indices of the farthest points of the second image to the first image.
+%   
 %   Notes
 %   -----
 %   IMHAUSDORFF uses BWDIST for fast computation, therefore the output
@@ -159,8 +169,21 @@ if isa(A,'categorical')
     end
 end
 
+% Check for optional inputs and set defaults, if arguments are less than 3, set defaults.
+% If arguments are more than 3, validate the inputs. Check the case where only bidirectional is specified. 
+
+
 if nargin < 3
     method = 'euclidean';
+    bidirectional='false';
+elseif nargin < 4
+    if ischar(varargin{1})
+        method = varargin{1};
+        bidirectional='false';
+    else
+        method = 'euclidean';
+        bidirectional = varargin{1};
+    end
 else
     valid_methods = {'euclidean','euclidean_precise','cityblock', ...
         'chessboard','chebychev','quasi-euclidean'};
@@ -169,13 +192,17 @@ else
     if strcmp(method,'chebychev')
         method = 'chessboard'; % synonymous
     end
+    valid_bidirectional = {'true','false'};
+    bidirectional = validatestring(bidirectional, valid_bidirectional, ...
+                          mfilename, 'BIDIRECTIONAL', 3);
+
 end
 
 
 if isa(A,'logical')
     % binary segmentation
     if (nargout == 2)
-        [D,idx] = bwhdist2(A,B,method);
+        [D,idx] = bwhdist2(A,B,method,bidirectional);
     else
         D = bwhdist(A,B,method);
     end
@@ -199,7 +226,7 @@ else
     if (nargout == 2)
         idx=nan(numel(classes),2);
         for k = 1:numel(classes)
-            [D(k),idx(k,:)] = bwhdist2(BW1{k},BW2{k},method);
+            [D(k),idx(k,:)] = bwhdist2(BW1{k},BW2{k},method,bidirectional);
         end
     else
         for k = 1:numel(classes)
@@ -210,8 +237,14 @@ end
 
 
 % Max of distance from A to B and from B to A
-function D=bwhdist(A,B,method)
-D=max( dir_hdist(A,B,method), dir_hdist(B,A,method) );
+function D=bwhdist(A,B,method, bidirectional)
+if strcmp(bidirectional,'true')
+    D={[dir_hdist(A,B,method)];[dir_hdist(B,A,method)]};
+else
+    D=max( dir_hdist(A,B,method), dir_hdist(B,A,method) );
+end
+
+
 
 % Max distance from points in A to B
 function D=dir_hdist(A,B,method)
@@ -227,18 +260,53 @@ else
 end
 
 
-% Max of distance from A to B and from B to A
-% Also returning linear indices of fathest point pair
-function [D,idx]=bwhdist2(A,B,method)
-[d_AB,idx_AB]=dir_hdist2(A,B,method);
-[d_BA,idx_BA]=dir_hdist2(B,A,method);
-if(d_AB>d_BA)
-    D=d_AB;
-    idx=idx_AB;
-else
-    D=d_BA;
-    idx=fliplr(idx_BA); % First idx is in A
-end
+% % Max of distance from A to B and from B to A
+% % Also returning linear indices of fathest point pair
+% function [D,idx]=bwhdist2(A,B,method)
+% [d_AB,idx_AB]=dir_hdist2(A,B,method);
+% [d_BA,idx_BA]=dir_hdist2(B,A,method);
+% if(d_AB>d_BA)
+%     D=d_AB;
+%     idx=idx_AB;
+% else
+%     D=d_BA;
+%     idx=fliplr(idx_BA); % First idx is in A
+% end
+
+function [D,idx]=bwhdist2(A,B,method,bidirectional)
+    if nargin<4
+        bidirectional='false';
+    end
+    if strcmp(bidirectional,'true')
+        [D,idx]=bwhdist2_cell(A,B,method);
+    else
+        [D,idx]=bwhdist2_max(A,B,method);
+    end
+    end
+    
+    function [D,idx]=bwhdist2_max(A,B,method)
+    [d_AB,idx_AB]=dir_hdist2(A,B,method);
+    [d_BA,idx_BA]=dir_hdist2(B,A,method);
+    if(d_AB>d_BA)
+        D=d_AB;
+        idx=idx_AB;
+    else
+        D=d_BA;
+        idx=fliplr(idx_BA); % First idx is in A
+    end
+    end
+    
+    function [D,idx]=bwhdist2_cell(A,B,method)
+    [d_AB,idx_AB]=dir_hdist2(A,B,method);
+    [d_BA,idx_BA]=dir_hdist2(B,A,method);
+    if(d_AB>d_BA)
+        D={[d_AB];[d_BA]};
+        idx={[idx_AB];fliplr(idx_BA)}; % First idx is in A
+    else
+        D={[d_BA];[d_AB]};
+        idx={fliplr(idx_BA);[idx_AB]}; % First idx is in B
+    end
+    end
 
 % Max distance from points in A to B
 % Also returning linear indices of fathest point pair
